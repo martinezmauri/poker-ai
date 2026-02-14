@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <title>GG AI - V37 (Hybrid Gold)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/tesseract.js@5.0.0/dist/tesseract.min.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            background: '#09090b', surface: '#18181b', border: '#27272a',
+            primary: '#22c55e', accent: '#f97316', pot: '#eab308', rival: '#a855f7', btn: '#facc15'
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body { background-color: #09090b; color: #e4e4e7; font-family: 'Segoe UI', sans-serif; min-height: 100vh; overflow-y: auto; }
+    .interactive-box{ position:absolute; cursor:move; user-select:none; box-shadow:0 0 0 2px rgba(255,255,255,0.30); background-color:rgba(0,0,0,0.10); display:flex; z-index: 30; }
+    
+    .rival-box { border: 2px solid #a855f7; display: none; transition: border-color 0.2s ease; } 
+    .rival-active { border-color: #22c55e !important; background-color: rgba(34,197,94,0.1); box-shadow: 0 0 10px rgba(34,197,94,0.3); }
+    
+    .btn-zone { border: 2px dashed #facc15; display: none; border-radius: 50%; } 
+    .btn-active { border: 2px solid #facc15 !important; background-color: rgba(250, 204, 21, 0.2); box-shadow: 0 0 15px rgba(250, 204, 21, 0.6); }
+
+    .resize-handle{ width:15px; height:15px; background-color:currentColor; cursor:nwse-resize !important; position:absolute; bottom:0; right:0; border-top-left-radius:4px; z-index:20; }
+    #zoneBoard .grid-line { flex:1; border-right:1px dashed rgba(255,255,255,0.40); height:100%; pointer-events:none; }
+    
+    .pos-btn { @apply bg-zinc-800 text-zinc-400 border border-zinc-600 py-2 text-[10px] font-bold rounded cursor-pointer hover:bg-zinc-700 hover:text-white transition-all text-center uppercase tracking-wide; }
+    .pos-btn-active { @apply bg-btn text-black border-white shadow-[0_0_15px_rgba(250,204,21,0.6)] scale-105; }
+
+    .action-btn { @apply flex-1 py-3 text-[10px] font-black rounded border border-zinc-700 transition-all uppercase opacity-60; }
+    .action-active-check { @apply bg-zinc-500 text-white opacity-100 ring-2 ring-zinc-300; }
+    .action-active-call { @apply bg-blue-600 text-white opacity-100 ring-2 ring-blue-400; }
+    .action-active-raise { @apply bg-red-600 text-white opacity-100 ring-2 ring-red-400 shadow-[0_0_15px_rgba(220,38,38,0.4)]; }
+    
+    input[type=range] { -webkit-appearance: none; width: 100%; background: transparent; }
+    input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #22c55e; cursor: pointer; margin-top: -6px; }
+  </style>
+</head>
+
+<body class="flex flex-col">
+
+<header class="border-b border-border p-3 flex justify-between items-center bg-surface sticky top-0 z-50 shadow-md">
+  <div class="flex items-center gap-4">
+    <h1 class="text-lg font-bold text-primary flex items-center gap-2 leading-none">
+      <i data-lucide="zap" class="w-5 h-5"></i> GG AI <span class="text-xs text-zinc-500 font-mono text-btn">v37 HYBRID</span>
+    </h1>
+    
+    <select id="gameMode" onchange="runStrategy()" class="bg-zinc-800 text-[10px] text-white p-1 rounded border border-zinc-700 h-8 font-bold cursor-pointer hover:bg-zinc-700">
+        <option value="NL2">💰 NL2</option>
+        <option value="NL5">💸 NL5</option>
+        <option value="MTT">🏆 MTT</option>
+        <option value="PKO">🎯 PKO</option>
+    </select>
+
+    <select id="stackDepth" onchange="runStrategy()" class="bg-zinc-900 text-[10px] text-accent p-1 rounded border border-accent/50 h-8 font-bold cursor-pointer hover:bg-zinc-800">
+        <option value="deep">Deep (>40bb)</option>
+        <option value="mid">Mid (20-40bb)</option>
+        <option value="short">Short (<15bb)</option>
+    </select>
+  </div>
+
+  <div class="flex items-center gap-6">
+    <div class="text-right border-r border-zinc-700 pr-4">
+        <span class="text-[9px] text-zinc-500 block uppercase font-bold">Street</span>
+        <span id="streetDisplay" class="text-xl font-black text-accent leading-none">PRE</span>
+    </div>
+    <div class="text-right">
+        <span class="text-[9px] text-zinc-500 block uppercase font-bold">Posición</span>
+        <span id="positionDisplay" class="text-xl font-black text-btn leading-none">--</span>
+    </div>
+  </div>
+</header>
+
+<main class="grid grid-cols-1 lg:grid-cols-3 gap-4 p-4">
+  <div class="lg:col-span-2 flex flex-col gap-2">
+    <div class="relative w-full aspect-video bg-black rounded-xl border border-border overflow-hidden shadow-2xl" id="videoContainer">
+      <video id="video" autoplay playsinline muted class="w-full h-full object-contain pointer-events-none"></video>
+      
+      <div id="zoneHand" class="interactive-box border-2 border-primary z-10" style="left:42%; top:60%; width:16%; height:14%;"><div class="resize-handle"></div></div>
+      <div id="zoneBoard" class="interactive-box border-2 border-accent z-10" style="left:30%; top:35%; width:40%; height:12%;"><div class="grid-line"></div><div class="grid-line"></div><div class="grid-line"></div><div class="grid-line"></div><div class="grid-line"></div><div class="resize-handle"></div></div>
+      <div id="zonePot" class="interactive-box border-2 border-pot z-10" style="left:45%; top:24%; width:10%; height:8%;"><div class="absolute -top-4 left-0 text-[9px] font-bold bg-yellow-900 text-yellow-100 px-1 rounded">BOTE</div><div class="resize-handle"></div></div>
+
+      <div id="zoneR1" class="interactive-box rival-box z-20" style="left:10%; top:45%; width:6%; height:8%;"><div class="absolute -top-4 left-0 text-[8px] bg-purple-900 text-white px-1">R1</div><span class="rival-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-white text-[8px]"></span><div class="resize-handle"></div></div>
+      <div id="zoneR2" class="interactive-box rival-box z-20" style="left:10%; top:20%; width:6%; height:8%;"><div class="absolute -top-4 left-0 text-[8px] bg-purple-900 text-white px-1">R2</div><span class="rival-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-white text-[8px]"></span><div class="resize-handle"></div></div>
+      <div id="zoneR3" class="interactive-box rival-box z-20" style="left:47%; top:10%; width:6%; height:8%;"><div class="absolute -top-4 left-0 text-[8px] bg-purple-900 text-white px-1">R3</div><span class="rival-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-white text-[8px]"></span><div class="resize-handle"></div></div>
+      <div id="zoneR4" class="interactive-box rival-box z-20" style="left:84%; top:20%; width:6%; height:8%;"><div class="absolute -top-4 left-0 text-[8px] bg-purple-900 text-white px-1">R4</div><span class="rival-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-white text-[8px]"></span><div class="resize-handle"></div></div>
+      <div id="zoneR5" class="interactive-box rival-box z-20" style="left:84%; top:45%; width:6%; height:8%;"><div class="absolute -top-4 left-0 text-[8px] bg-purple-900 text-white px-1">R5</div><span class="rival-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-white text-[8px]"></span><div class="resize-handle"></div></div>
+
+      <div id="zoneB0" class="interactive-box btn-zone z-25" style="left:40%; top:55%; width:3%; height:4%;"><div class="absolute -top-4 left-0 text-[7px] text-yellow-500 font-bold">D-Hero</div><span class="btn-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-yellow-500 text-[8px] font-mono">0.00</span><div class="resize-handle"></div></div>
+      <div id="zoneB1" class="interactive-box btn-zone z-25" style="left:16%; top:45%; width:3%; height:4%;"><div class="absolute -top-4 left-0 text-[7px] text-yellow-500 font-bold">D-R1</div><span class="btn-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-yellow-500 text-[8px] font-mono">0.00</span><div class="resize-handle"></div></div>
+      <div id="zoneB2" class="interactive-box btn-zone z-25" style="left:16%; top:20%; width:3%; height:4%;"><div class="absolute -top-4 left-0 text-[7px] text-yellow-500 font-bold">D-R2</div><span class="btn-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-yellow-500 text-[8px] font-mono">0.00</span><div class="resize-handle"></div></div>
+      <div id="zoneB3" class="interactive-box btn-zone z-25" style="left:45%; top:15%; width:3%; height:4%;"><div class="absolute -top-4 left-0 text-[7px] text-yellow-500 font-bold">D-R3</div><span class="btn-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-yellow-500 text-[8px] font-mono">0.00</span><div class="resize-handle"></div></div>
+      <div id="zoneB4" class="interactive-box btn-zone z-25" style="left:80%; top:20%; width:3%; height:4%;"><div class="absolute -top-4 left-0 text-[7px] text-yellow-500 font-bold">D-R4</div><span class="btn-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-yellow-500 text-[8px] font-mono">0.00</span><div class="resize-handle"></div></div>
+      <div id="zoneB5" class="interactive-box btn-zone z-25" style="left:80%; top:45%; width:3%; height:4%;"><div class="absolute -top-4 left-0 text-[7px] text-yellow-500 font-bold">D-R5</div><span class="btn-score absolute bottom-0 right-0 p-0.5 bg-black/70 text-yellow-500 text-[8px] font-mono">0.00</span><div class="resize-handle"></div></div>
+    </div>
+
+    <div class="bg-surface p-3 rounded-xl border border-border shadow-sm flex flex-col gap-3">
+        <div class="grid grid-cols-3 gap-2 bg-black/40 p-2 rounded text-center">
+            <div class="flex flex-col"><span class="text-[8px] text-zinc-500 uppercase">Mano</span><span id="handStrengthLabel" class="text-[10px] font-bold text-white">--</span></div>
+            <div class="flex flex-col"><span class="text-[8px] text-zinc-500 uppercase">Outs</span><span id="outsDisplay" class="text-[10px] font-bold text-accent">0</span></div>
+            <div class="flex flex-col"><span class="text-[8px] text-zinc-500 uppercase">Prob</span><span id="winProbDisplay" class="text-[10px] font-bold text-green-500">0%</span></div>
+        </div>
+
+        <div class="flex gap-2" id="rivalActionGroup">
+            <button onclick="setRivalAction('check')" id="act-check" class="action-btn bg-zinc-900 text-zinc-400">Check</button>
+            <button onclick="setRivalAction('call')" id="act-call" class="action-btn bg-blue-900/10 text-blue-400">Call</button>
+            <button onclick="setRivalAction('raise')" id="act-raise" class="action-btn bg-red-900/10 text-red-400">Raise</button>
+            <button onclick="setRivalAction('none')" class="bg-zinc-800 text-zinc-500 px-3 rounded hover:text-white transition">
+                <i data-lucide="eraser" class="w-4 h-4"></i>
+            </button>
+        </div>
+        
+        <div class="flex items-center justify-between bg-zinc-900 p-2 rounded border border-zinc-700 flex-wrap gap-2">
+            <div class="flex items-center gap-2">
+                <button onclick="toggleSetupZones()" id="btnToggleZones" class="text-[9px] bg-zinc-700 text-white border border-zinc-600 px-2 py-1 rounded hover:bg-zinc-600 transition flex items-center gap-1">
+                    <i data-lucide="layout" class="w-3 h-3"></i> Conf.
+                </button>
+                <button onclick="captureCardTemplate()" class="text-[9px] bg-purple-600 text-white border border-purple-400 px-2 py-1 rounded hover:bg-purple-500 transition flex items-center gap-1">
+                    <i data-lucide="camera" class="w-3 h-3"></i> Dorso
+                </button>
+                <canvas id="cardPreview" width="30" height="20" class="border border-zinc-500 bg-black"></canvas>
+            </div>
+            
+            <div class="flex items-center gap-3">
+                <span class="text-[9px] text-zinc-500 font-bold">Rivales:</span>
+                <span id="playerCount" class="text-xl font-black text-white w-4 text-center">--</span>
+                <span class="text-[9px] text-yellow-500 font-bold pl-2">Dealer:</span>
+                <span id="btnLocDisplay" class="text-[9px] text-yellow-400 font-black">--</span>
+            </div>
+        </div>
+
+        <div class="px-2 grid grid-cols-2 gap-4">
+            <div>
+                <div class="flex justify-between text-[8px] text-zinc-500 uppercase font-bold mb-1">
+                    <span>Sens. Rivales</span><span id="sensRivalVal">50</span>
+                </div>
+                <input type="range" id="sensRivalSlider" min="10" max="150" value="50" oninput="saveSensitivity()">
+            </div>
+            <div>
+                <div class="flex justify-between text-[8px] text-zinc-500 uppercase font-bold mb-1">
+                    <span>Sens. Dealer (0.1-0.6)</span><span id="sensDealerVal">0.26</span>
+                </div>
+                <input type="range" id="sensDealerSlider" min="10" max="60" value="26" step="1" oninput="saveSensitivity()">
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-surface p-3 rounded-xl border border-border shadow-inner grid grid-cols-2 gap-4">
+        <div>
+            <label class="text-[9px] text-zinc-500 uppercase font-bold block mb-1">Bote ($)</label>
+            <input type="number" id="potSize" placeholder="0" oninput="runStrategy()" class="w-full bg-zinc-900 border border-yellow-700/50 rounded p-1.5 text-yellow-500 font-bold text-sm outline-none focus:border-yellow-500 text-center transition-all">
+        </div>
+        <div>
+            <label class="text-[9px] text-zinc-500 uppercase font-bold block mb-1">Apuesta ($)</label>
+            <input type="number" id="rivalBet" placeholder="0" oninput="runStrategy()" class="w-full bg-zinc-900 border border-zinc-700 rounded p-1.5 text-white font-bold text-sm outline-none focus:border-red-500 text-center">
+        </div>
+    </div>
+  </div>
+
+  <div class="flex flex-col gap-4">
+    <div class="bg-zinc-900 border-2 border-primary/50 rounded-xl p-5 shadow-lg flex flex-col gap-2 relative overflow-hidden suggestion-box">
+        <div class="flex justify-between items-center mb-1">
+            <div class="flex flex-col">
+                <span class="text-[8px] text-zinc-500 uppercase font-bold">Fase</span>
+                <span id="streetTag" class="text-[10px] font-black px-2 py-0.5 rounded-full bg-accent text-black">PREFLOP</span>
+            </div>
+            <div class="flex flex-col items-end">
+                <span class="text-[8px] text-zinc-500 uppercase font-bold">Eq. Req.</span>
+                <span id="oddsNeeded" class="text-xs font-black text-yellow-500">0%</span>
+            </div>
+        </div>
+        <div id="aiAction" class="text-3xl font-black text-white text-center py-2 uppercase tracking-tighter leading-none">--</div>
+        <div class="bg-black/40 rounded p-3 border border-white/10 mt-1">
+            <p id="aiReason" class="text-[11px] text-zinc-400 text-center italic leading-tight">Esperando datos...</p>
+        </div>
+    </div>
+
+    <div class="bg-surface p-2 rounded-xl border border-zinc-700">
+        <p class="text-[9px] text-zinc-500 uppercase font-bold mb-1 text-center">POSICIÓN MANUAL (PRIORIDAD)</p>
+        <div id="manualPosGrid" class="grid grid-cols-3 gap-1.5"></div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2">
+      <button id="btnStart" onclick="startCapture()" class="py-2 bg-zinc-100 hover:bg-white text-black font-bold rounded text-xs uppercase">1. Capturar</button>
+      <button id="btnScan" onclick="toggleScan()" disabled class="py-2 bg-zinc-800 text-zinc-500 font-bold rounded border border-zinc-700 text-xs uppercase">2. Analizar</button>
+    </div>
+
+    <div class="bg-surface border border-border rounded-xl p-4 flex flex-col gap-3 shadow-sm">
+        <div id="resHand" class="flex gap-2 justify-center py-2 border-b border-zinc-800 min-h-[64px]">--</div>
+        <div id="resBoard" class="flex gap-1 justify-center min-h-[64px]">--</div>
+    </div>
+
+    <div id="debugContainer" class="flex flex-wrap gap-1 justify-center p-2 bg-black rounded border border-zinc-700 min-h-[50px]"></div>
+
+    <div class="flex justify-between items-center gap-2">
+      <button onclick="saveZones()" class="flex-1 text-[10px] bg-zinc-800 text-zinc-300 py-3 rounded font-bold uppercase border border-zinc-700 hover:bg-zinc-700 transition">Guardar Cajas</button>
+      <select id="tableSize" onchange="runStrategy()" class="bg-zinc-800 text-[10px] text-white p-1.5 rounded border border-zinc-700 h-10">
+          <option value="6">6-Max</option><option value="9">9-Max</option><option value="2">HU</option>
+      </select>
+    </div>
+  </div>
+</main>
+
+<script>
+  lucide.createIcons();
+  
+  const STRATEGY_CONFIG = {
+      NL2: {
+          PRE: {
+              UTG:  { pair:7, high_val:13, low_val:11, suited_high:13, suited_low:10, advice: "OPEN 3x (Solo Premium)" },
+              MP:   { pair:6, high_val:13, low_val:10, suited_high:10, suited_low:9, advice: "OPEN 3x (Sólido)" },
+              CO:   { pair:4, high_val:13, low_val:10, suited_high:10, suited_low:8, advice: "OPEN 3x" },
+              BTN:  { pair:2, high_val:14, low_val:7, suited_high:13, suited_low:2, advice_steal: "OPEN 2.5x (A7o+, KTo+)" },
+              SB:   { pair:6, high_val:14, low_val:12, advice_def: "FOLD vs 3BET (OOP!!)" },
+              BB:   { pair:6, high_val:14, low_val:12, advice_def: "FOLD vs 3BET (OOP!!)" }
+          },
+          POST: { flop: "BET 2/3 (Value)", turn: "BET 2/3 (Solo Value)", river: "FOLD vs RAISE" }
+      },
+      NL5: {
+          PRE: {
+              UTG:  { pair:6, high_val:13, low_val:10, suited_high:12, suited_low:10 },
+              BTN:  { pair:2, high_val:10, low_val:0, suited_high:8, suited_low:0, advice_steal: "OPEN 3x (Attack)" },
+              SB:   { pair:2, high_val:12, low_val:10, advice_def: "3BET or FOLD" }
+          },
+          POST: { flop: "BET 1/3 (Dry) / 2/3 (Wet)", turn: "BARREL (Si ayuda)", river: "CHECK/CALL (Catch)" }
+      },
+      MTT: {}, PKO: {}
+  };
+
+  const video = document.getElementById('video');
+  const videoContainer = document.getElementById('videoContainer');
+  let isScanning = false, scanInterval = null, worker = null;
+  let gameState = { 
+      myHand: [], board: [], position: null, rivalAction: 'none', 
+      outs: 0, activePlayers: 1, zonesVisible: false, dealerSeat: -1,
+      street: 'PRE', mode: 'NL2', stack: 'deep'
+  };
+  let cardTemplateData = null; 
+
+  // --- GARBAGE COLLECTION (V36 Feature) ---
+  window.addEventListener('beforeunload', async () => {
+      if(scanInterval) clearInterval(scanInterval);
+      if(worker) await worker.terminate();
+  });
+
+  function setManualPosition(posName) {
+      gameState.position = posName;
+      document.getElementById('positionDisplay').innerText = posName;
+      const grid = document.getElementById('manualPosGrid');
+      Array.from(grid.children).forEach(btn => {
+         btn.className = "pos-btn py-2 " + (btn.innerText === posName ? "pos-btn-active" : "");
+      });
+      runStrategy(); 
+  }
+
+  function saveZones() {
+    const d = { 
+        h: { l: zoneHand.style.left, t: zoneHand.style.top, w: zoneHand.style.width, h: zoneHand.style.height }, 
+        b: { l: zoneBoard.style.left, t: zoneBoard.style.top, w: zoneBoard.style.width, h: zoneBoard.style.height },
+        p: { l: zonePot.style.left, t: zonePot.style.top, w: zonePot.style.width, h: zonePot.style.height },
+        r: ['zoneR1','zoneR2','zoneR3','zoneR4','zoneR5'].map(id => { const el=document.getElementById(id); return {l:el.style.left,t:el.style.top,w:el.style.width,h:el.style.height}; }),
+        btn: ['zoneB0','zoneB1','zoneB2','zoneB3','zoneB4','zoneB5'].map(id => { const el=document.getElementById(id); return {l:el.style.left,t:el.style.top,w:el.style.width,h:el.style.height}; })
+    };
+    localStorage.setItem('gg_zones_global', JSON.stringify(d)); 
+    alert("Configuración guardada.");
+  }
+
+  function loadZones() {
+    const s = localStorage.getItem('gg_zones_global') || localStorage.getItem('gg_zones_v33');
+    if(s) { 
+        const d = JSON.parse(s); 
+        if(d.h) { zoneHand.style.left=d.h.l; zoneHand.style.top=d.h.t; zoneHand.style.width=d.h.w; zoneHand.style.height=d.h.h; }
+        if(d.b) { zoneBoard.style.left=d.b.l; zoneBoard.style.top=d.b.t; zoneBoard.style.width=d.b.w; zoneBoard.style.height=d.b.h; }
+        if(d.p) { zonePot.style.left=d.p.l; zonePot.style.top=d.p.t; zonePot.style.width=d.p.w; zonePot.style.height=d.p.h; }
+        if(d.r) { ['zoneR1','zoneR2','zoneR3','zoneR4','zoneR5'].forEach((id, i) => { const el=document.getElementById(id); if(d.r[i]) { el.style.left=d.r[i].l; el.style.top=d.r[i].t; el.style.width=d.r[i].w; el.style.height=d.r[i].h; } }); }
+        if(d.btn) { ['zoneB0','zoneB1','zoneB2','zoneB3','zoneB4','zoneB5'].forEach((id, i) => { const el=document.getElementById(id); if(d.btn[i]) { el.style.left=d.btn[i].l; el.style.top=d.btn[i].t; el.style.width=d.btn[i].w; el.style.height=d.btn[i].h; } }); }
+    }
+  }
+
+  function toggleSetupZones() {
+      gameState.zonesVisible = !gameState.zonesVisible;
+      document.querySelectorAll('.rival-box').forEach(z => z.style.display = gameState.zonesVisible ? 'flex' : 'none');
+      document.querySelectorAll('.btn-zone').forEach(z => z.style.display = gameState.zonesVisible ? 'flex' : 'none');
+      const btn = document.getElementById('btnToggleZones');
+      if(gameState.zonesVisible) {
+          btn.className = "text-[9px] bg-zinc-500 text-white border border-zinc-400 px-2 py-1 rounded transition flex items-center gap-1";
+          btn.innerHTML = `<i data-lucide="eye-off" class="w-3 h-3"></i> Ocultar`;
+      } else {
+          btn.className = "text-[9px] bg-zinc-700 text-white border border-zinc-600 px-2 py-1 rounded hover:bg-zinc-600 transition flex items-center gap-1";
+          btn.innerHTML = `<i data-lucide="layout" class="w-3 h-3"></i> Conf.`;
+      }
+      lucide.createIcons();
+  }
+
+  function saveSensitivity() {
+      const rVal = document.getElementById('sensRivalSlider').value;
+      const dVal = document.getElementById('sensDealerSlider').value;
+      const dValF = (parseInt(dVal) / 100).toFixed(2);
+      document.getElementById('sensRivalVal').innerText = rVal;
+      document.getElementById('sensDealerVal').innerText = dValF;
+      localStorage.setItem('gg_sens_rival_global', rVal);
+      localStorage.setItem('gg_sens_dealer_global', dValF);
+  }
+
+  function setRivalAction(action) {
+      gameState.rivalAction = action;
+      ['check', 'call', 'raise', 'none'].forEach(act => {
+        const btn = document.getElementById('act-'+act);
+        if(btn) {
+           if(act === action) {
+              if(act==='check') btn.className = "action-btn action-active-check";
+              else if(act==='call') btn.className = "action-btn action-active-call";
+              else if(act==='raise') btn.className = "action-btn action-active-raise";
+           } else {
+              btn.className = "action-btn bg-zinc-900 text-zinc-400";
+              if(act==='call') btn.className += " bg-blue-900/10 text-blue-400";
+              if(act==='raise') btn.className += " bg-red-900/10 text-red-400";
+           }
+        }
+      });
+      runStrategy();
+  }
+
+  function getVideoContentRect(){
+    const r = videoContainer.getBoundingClientRect(); if(!video.videoWidth) return null;
+    const vAR = video.videoWidth/video.videoHeight, cAR = r.width/r.height;
+    let dw, dh, ox, oy;
+    if(cAR > vAR){ dh = r.height; dw = dh * vAR; ox = (r.width - dw) / 2; oy = 0; }
+    else { dw = r.width; dh = dw / vAR; ox = 0; oy = (r.height - dh) / 2; }
+    return { left: r.left + ox, top: r.top + oy, width: dw, height: dh };
+  }
+
+  function getZoneCoords(z) {
+    const c = getVideoContentRect(); if(!c) return null;
+    const r = z.getBoundingClientRect(); const sx = video.videoWidth / c.width, sy = video.videoHeight / c.height;
+    return { x: (r.left - c.left) * sx, y: (r.top - c.top) * sy, w: r.width * sx, h: r.height * sy };
+  }
+
+  function captureCardTemplate() {
+      const r1 = document.getElementById('zoneR1');
+      const coords = getZoneCoords(r1);
+      if(!coords || coords.w <= 0) { alert("Configura la zona R1 primero."); return; }
+      const cvs = document.createElement('canvas'); const ctx = cvs.getContext('2d');
+      cvs.width = 30; cvs.height = 20; 
+      ctx.drawImage(video, coords.x, coords.y, coords.w, coords.h, 0, 0, 30, 20);
+      const data = ctx.getImageData(0,0,30,20).data;
+      cardTemplateData = data;
+      document.getElementById('cardPreview').getContext('2d').putImageData(new ImageData(data, 30, 20), 0, 0);
+      localStorage.setItem('gg_template_global', cvs.toDataURL());
+      alert("Dorso capturado.");
+  }
+
+  function loadTemplate() {
+      const saved = localStorage.getItem('gg_template_global') || localStorage.getItem('gg_template_v33');
+      if(saved) {
+          const img = new Image();
+          img.onload = () => {
+              const cvs = document.createElement('canvas'); cvs.width=30; cvs.height=20;
+              const ctx = cvs.getContext('2d'); ctx.drawImage(img,0,0);
+              cardTemplateData = ctx.getImageData(0,0,30,20).data;
+              document.getElementById('cardPreview').getContext('2d').drawImage(img,0,0);
+          };
+          img.src = saved;
+      }
+  }
+
+  async function processCards() {
+      document.getElementById('debugContainer').innerHTML = '';
+      const cH = getZoneCoords(zoneHand), cB = getZoneCoords(zoneBoard), cP = getZoneCoords(zonePot);
+      
+      // 1. Detección Mano
+      if (cH) {
+          const c1 = await analyzeSingleSlot(cH.x, cH.y, cH.w * 0.5, cH.h);
+          const c2 = await analyzeSingleSlot(cH.x + (cH.w * 0.5), cH.y, cH.w * 0.5, cH.h);
+          gameState.myHand = [c1, c2].filter(x=>x); renderCards('resHand', gameState.myHand);
+      }
+      
+      // 2. Detección Board
+      if (cB) {
+          const slotW = cB.w / 5; const newB = [];
+          for (let i = 0; i < 5; i++) {
+              const c = await analyzeSingleSlot(cB.x + (slotW * i), cB.y, slotW, cB.h);
+              if(c) newB.push(c);
+          }
+          gameState.board = newB; 
+          renderCards('resBoard', gameState.board);
+          if (newB.length === 0) gameState.street = 'PRE';
+          else if (newB.length === 3) gameState.street = 'FLOP';
+          else if (newB.length === 4) gameState.street = 'TURN';
+          else if (newB.length === 5) gameState.street = 'RIVER';
+          document.getElementById('streetDisplay').innerText = gameState.street;
+          document.getElementById('streetTag').innerText = gameState.street === 'PRE' ? 'PREFLOP' : gameState.street;
+      }
+      if (cP) { await analyzePot(cP.x, cP.y, cP.w, cP.h); }
+
+      // 3. Detección Rivales (RESTAURADO V34: Lógica de bucle crítica)
+      let activeSeats = [];
+      if(gameState.myHand.length > 0) activeSeats.push(0); // Hero siempre activo
+      const rivalIds = ['zoneR1','zoneR2','zoneR3','zoneR4','zoneR5'];
+      const sensRival = parseInt(document.getElementById('sensRivalSlider').value) || 50;
+      
+      for(let i=0; i<rivalIds.length; i++) {
+          const rid = rivalIds[i]; 
+          const zoneEl = document.getElementById(rid); 
+          const coords = getZoneCoords(zoneEl);
+          let isMatch = false; 
+          let score = 999;
+          
+          if(coords && cardTemplateData) { // Bug fix: Chequeo de template
+              score = await checkTemplateMatch(coords.x, coords.y, coords.w, coords.h);
+              if (score < sensRival) isMatch = true;
+          }
+          
+          if(zoneEl.querySelector('.rival-score')) zoneEl.querySelector('.rival-score').innerText = Math.round(score);
+          if(isMatch) { 
+              activeSeats.push(i+1); 
+              zoneEl.classList.add('rival-active'); 
+          } else { 
+              zoneEl.classList.remove('rival-active'); 
+          }
+      }
+      activeSeats.sort((a,b)=>a-b);
+      gameState.activePlayers = activeSeats.length;
+      document.getElementById('playerCount').innerText = gameState.activePlayers;
+
+      // 4. Detección Dealer (RESTAURADO V34: Lógica completa)
+      const dealerZones = [ { seat: 0, id: 'zoneB0' }, { seat: 1, id: 'zoneB1' }, { seat: 2, id: 'zoneB2' }, { seat: 3, id: 'zoneB3' }, { seat: 4, id: 'zoneB4' }, { seat: 5, id: 'zoneB5' } ];
+      let bestBtnSeat = -1; let bestBtnScore = -Infinity;
+      const sensDealer = parseInt(document.getElementById('sensDealerSlider').value) / 100;
+      
+      for(const dz of dealerZones) {
+          const el = document.getElementById(dz.id); const c = getZoneCoords(el);
+          if(!c) continue;
+          const res = await detectDealerButtonInZone(c.x, c.y, c.w, c.h);
+          if(el.querySelector('.btn-score')) el.querySelector('.btn-score').innerText = res.score.toFixed(2);
+          if(res.score > bestBtnScore) { bestBtnScore = res.score; bestBtnSeat = dz.seat; }
+          if(res.score > sensDealer) el.classList.add('btn-active'); else el.classList.remove('btn-active');
+      }
+      
+      if(bestBtnScore > sensDealer && bestBtnSeat !== -1) {
+          gameState.dealerSeat = bestBtnSeat;
+          // RESTAURADO: Pasamos activeSeats para el cálculo real
+          calculateHeroPosition(activeSeats, bestBtnSeat); 
+      }
+  }
+
+  // FIX: Crash prevent si template es null
+  async function checkTemplateMatch(x, y, w, h) {
+      if(w<=0 || h<=0 || !cardTemplateData) return 999; 
+      const cvs = document.createElement('canvas'); const ctx = cvs.getContext('2d');
+      cvs.width = 30; cvs.height = 20;
+      ctx.drawImage(video, x, y, w, h, 0, 0, 30, 20);
+      const currentData = ctx.getImageData(0,0,30,20).data;
+      let totalDiff = 0; let pixels = 0;
+      for(let i=0; i<currentData.length; i+=4) {
+          totalDiff += (Math.abs(currentData[i] - cardTemplateData[i]) + Math.abs(currentData[i+1] - cardTemplateData[i+1]) + Math.abs(currentData[i+2] - cardTemplateData[i+2])) / 3;
+          pixels++;
+      }
+      return totalDiff / pixels;
+  }
+
+  async function detectDealerButtonInZone(x, y, w, h) {
+      if (w <= 0 || h <= 0) return { score:0 };
+      const cvs = document.createElement('canvas'); const ctx = cvs.getContext('2d', { willReadFrequently: true });
+      const W = 60, H = 40; cvs.width = W; cvs.height = H;
+      ctx.drawImage(video, x, y, w, h, 0, 0, W, H);
+      const img = ctx.getImageData(0, 0, W, H).data;
+      let yellow = 0, bright = 0, edges = 0;
+      const lum = new Uint8Array(W * H);
+      for (let i=0, p=0; i<img.length; i+=4, p++){
+        const r=img[i], g=img[i+1], b=img[i+2];
+        const L = (0.299*r + 0.587*g + 0.114*b) | 0;
+        lum[p] = L;
+        if (r > 140 && g > 120 && b < 120 && Math.abs(r - g) < 60) yellow++;
+        if (L > 180) bright++;
+      }
+      for (let yy=1; yy<H-1; yy++){
+        for (let xx=1; xx<W-1; xx++){
+          const i = yy*W + xx;
+          const gx = lum[i+1] - lum[i-1];
+          const gy = lum[i+W] - lum[i-W];
+          if (Math.abs(gx) + Math.abs(gy) > 35) edges++;
+        }
+      }
+      return { score: ((yellow/(W*H))*3.5) + ((edges/((W-2)*(H-2)))*1.2) + ((bright/(W*H))*0.3) };
+  }
+
+  // RESTAURADO V34: Lógica matemática real de posición
+  function calculateHeroPosition(activeSeats, btnSeat) {
+      if(activeSeats.length < 2) return;
+      let seatsBetween = 0; 
+      let ptr = btnSeat;
+      // Calcula distancia entre Dealer y Hero (Asiento 0) saltando inactivos
+      while(ptr !== 0) { 
+          ptr = (ptr + 1) % 6; 
+          if(activeSeats.includes(ptr) && ptr !== 0) seatsBetween++; 
+      }
+      
+      let posName = "?"; 
+      const total = activeSeats.length;
+      
+      if(total === 2) { posName = (btnSeat === 0) ? "SB" : "BB"; } 
+      else {
+          if(btnSeat === 0) posName = "BTN";
+          else {
+              if(seatsBetween === 0) posName = "SB"; else if(seatsBetween === 1) posName = "BB";
+              else if(seatsBetween === 2) posName = "UTG"; else if(seatsBetween === 3) posName = "MP";
+              else if(seatsBetween === 4) posName = "CO";
+              // Ajustes dinámicos por num jugadores
+              if(total === 3 && seatsBetween === 1) posName = "BB";
+              if(total === 4 && seatsBetween === 2) posName = "CO";
+              if(total === 5 && seatsBetween === 2) posName = "UTG";
+              if(total === 5 && seatsBetween === 3) posName = "CO";
+          }
+      }
+      if(posName) setManualPosition(posName);
+  }
+
+  function runStrategy() {
+      const { myHand: hand, board, rivalAction: rival, position: pos, activePlayers: players, street } = gameState;
+      const mode = document.getElementById('gameMode').value;
+      const stack = document.getElementById('stackDepth').value;
+      const config = STRATEGY_CONFIG[mode] || STRATEGY_CONFIG['NL2'];
+
+      if (isScanning && hand.length < 2) {
+          document.getElementById('aiReason').innerText = "Buscando cartas...";
+          document.getElementById('aiAction').innerText = "--";
+          return;
+      }
+      if (hand.length < 2) return; 
+
+      // DOM RESTAURADO
+      const currentHand = evaluateHand(hand, board);
+      document.getElementById('handStrengthLabel').innerText = currentHand.label;
+      const outs = calculateCleanOuts(hand, board);
+      const prob = board.length === 3 ? (outs * 4) : (outs * 2);
+      document.getElementById('outsDisplay').innerText = outs;
+      document.getElementById('winProbDisplay').innerText = prob + "%";
+      
+      const pot = parseFloat(document.getElementById('potSize').value) || 0;
+      const bet = parseFloat(document.getElementById('rivalBet').value) || 0;
+      let equityNeeded = 0;
+      if (bet > 0) equityNeeded = (bet / (pot + bet + bet)) * 100;
+      document.getElementById('oddsNeeded').innerText = equityNeeded.toFixed(1) + "%";
+
+      const v1=getVal(hand[0].rank), v2=getVal(hand[1].rank); 
+      const isPair = hand[0].rank === hand[1].rank; 
+      const isSuited = hand[0].suit === hand[1].suit;
+      const hi = Math.max(v1, v2); const lo = Math.min(v1, v2);
+
+      if (!pos && street === 'PRE') {
+          advice("¿POSICIÓN?", "¡Selecciona tu asiento abajo!", "accent");
+          return;
+      }
+
+      if (street === 'PRE') {
+          if (mode === 'MTT' || mode === 'PKO') {
+              if (stack === 'short') { 
+                 if (isPair || hi >= 13) return advice("PUSH ALL-IN", "Short Stack Value.", "green");
+                 if (isSuited && hi >= 12) return advice("PUSH (Steal)", "High Equity.", "green");
+                 return advice("FOLD", "Espera Spot.", "red");
+              }
+              if (stack === 'mid') { 
+                 if (mode === 'PKO' && isSuited && hi >= 11) return advice("CALL / ISO", "Caza Bounties.", "blue");
+                 if (isPair && v1 >= 8) return advice("RAISE / CALL", "Sólido.", "green");
+              }
+          }
+          const range = config.PRE[pos];
+          if (range) {
+             if (isPair) {
+                 if (v1 >= range.pair) return advice("OPEN 3x", "Pareja en rango.", "green");
+                 if (range.advice_steal && v1 >= 2) return advice("OPEN", range.advice_steal, "yellow");
+             }
+             if (!isPair && hi >= range.high_val && lo >= range.low_val) return advice("OPEN 3x", "Value.", "green");
+             if (isSuited && hi >= range.suited_high && lo >= range.suited_low) return advice("OPEN 3x", "Suited Value.", "green");
+             if (rival === 'raise' && range.advice_def) {
+                 if (range.advice_def.includes("FOLD")) return advice("FOLD", range.advice_def, "red");
+                 if (isPair || hi >= 13) return advice("CALL", "Top Range.", "yellow");
+                 return advice("FOLD", "Anti-Spew.", "red");
+             }
+             if (pos === 'BTN' && range.advice_steal) {
+                 if (hi >= 13) return advice("OPEN", "Robo Sólido.", "green");
+                 return advice("FOLD", "Basura Offsuit.", "red");
+             }
+             return advice("FOLD", "Fuera de rango.", "red");
+          } else {
+             if (isPair || hi >= 13) return advice("RAISE", "Mano fuerte (Genérica).", "green");
+             return advice("FOLD", "Tight is right (Genérico).", "red");
+          }
+      }
+      
+      const isMultiway = players > 2; // AHORA SÍ FUNCIONA (porque players se calcula bien)
+      if (street === 'FLOP') {
+          if (currentHand.score >= 3) return advice("BET 2/3 (Value)", "Value Grueso.", "green");
+          if (currentHand.score >= 2.2) return advice(isMultiway ? "CHECK/CALL" : "BET 50%", "Top Pair.", "green");
+          if (outs >= 8) return advice("CHECK/CALL", "Draw fuerte.", "blue");
+          return advice("FOLD", "Sin ligar.", "red");
+      }
+      if (street === 'TURN') {
+          if (currentHand.score >= 2.2) return advice("BET / BARREL", "Sigue cobrando.", "green");
+          if (mode === 'NL5' && outs >= 9) return advice("SEMI-BLUFF", "Presión.", "blue");
+          return advice("CHECK/FOLD", "Sin mano.", "red");
+      }
+      if (street === 'RIVER') {
+         if (currentHand.score >= 3) return advice("VALUE BET", "Cobra.", "green");
+         if (currentHand.score >= 2.2) return advice("CHECK/CALL", "Showdown.", "zinc");
+         return advice("FOLD", "No pagues.", "red");
+      }
+  }
+
+  function advice(act, txt, col) {
+      document.getElementById('aiAction').innerText = act;
+      document.getElementById('aiReason').innerText = txt;
+      const maps = {green:'text-green-500', red:'text-red-500', blue:'text-blue-400', yellow:'text-yellow-400', zinc:'text-zinc-400', accent:'text-accent'};
+      document.getElementById('aiAction').className = `text-3xl font-black text-center py-2 ${maps[col]}`;
+  }
+
+  async function analyzePot(x, y, w, h) { if (w <= 0 || h <= 0) return; const cvs = document.createElement('canvas'); const ctx = cvs.getContext('2d'); cvs.width = w * 2; cvs.height = h * 2; ctx.drawImage(video, x, y, w, h, 0, 0, cvs.width, cvs.height); const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height); for (let i = 0; i < imgData.data.length; i += 4) { const avg = (imgData.data[i] + imgData.data[i+1] + imgData.data[i+2]) / 3; const v = avg > 150 ? 0 : 255; imgData.data[i] = imgData.data[i+1] = imgData.data[i+2] = v; } ctx.putImageData(imgData, 0, 0); try { const { data } = await worker.recognize(cvs); let t = data.text.replace(/[^0-9.]/g, ''); let val = parseFloat(t); if (!isNaN(val) && val > 0) { document.getElementById('potSize').value = val; } } catch (e) {} }
+  async function analyzeSingleSlot(x, y, w, h) { 
+      if (w <= 0 || h <= 0) return null; 
+      const cvs = document.createElement('canvas'); 
+      const ctx = cvs.getContext('2d', { willReadFrequently: true }); 
+      // V36: Alta Resolución
+      cvs.width = Math.round(w * 2.5); 
+      cvs.height = Math.round(h * 2.5); 
+      ctx.drawImage(video, x, y, w, h, 0, 0, cvs.width, cvs.height); 
+      
+      // RESTAURADO V34: Radio de color más preciso (35)
+      const colorSuit = detectColorAt(ctx, cvs.width/2, cvs.height/2, 35); 
+      
+      const imgData = ctx.getImageData(0, 0, cvs.width, cvs.height); 
+      for (let k = 0; k < imgData.data.length; k += 4) { 
+          const gray = 0.299 * imgData.data[k] + 0.587 * imgData.data[k+1] + 0.114 * imgData.data[k+2]; 
+          // RESTAURADO V34: Umbral seguro (125) para no borrar cartas finas
+          imgData.data[k] = imgData.data[k+1] = imgData.data[k+2] = (gray > 125) ? 0 : 255; 
+      } 
+      ctx.putImageData(imgData, 0, 0); 
+      
+      try { 
+          const { data } = await worker.recognize(cvs); 
+          let t = data.text.replace(/[^0-9TJQKA]/g, '').trim(); 
+          if (t) { 
+              t = t.includes('10') ? '10' : t[0]; 
+              if (t === '0' || t === 'O') t = 'Q'; 
+              if (t === '1' || t === 'I') t = 'A'; 
+              return { rank: t, suit: colorSuit }; 
+          } 
+      } catch (e) {} 
+      return null; 
+  }
+  
+  function detectColorAt(ctx, cx, cy, radius) { const d = ctx.getImageData(cx - radius/2, cy - radius/2, radius, radius).data; let s = { g: 0, b: 0, r: 0, k: 0 }; for (let i = 0; i < d.length; i += 4) { const r = d[i], g = d[i+1], b = d[i+2]; if (r > 190 && g > 190 && b > 190) continue; if (g > r + 15 && g > b + 15) s.g++; else if (b > r + 15 && b > g + 5) s.b++; else if (r > g + 35 && r > b + 35) s.r++; else if (r < 100 && g < 100 && b < 100) s.k++; } const max = Math.max(s.g, s.b, s.r, s.k); if (max < 4) return '♠'; if (s.r === max) return '♥'; if (s.b === max) return '♦'; if (s.g === max) return '♣'; return '♠'; }
+  function renderCards(id, list) { const el = document.getElementById(id); el.innerHTML=''; list.forEach(c => { let col = (c.suit === '♥' || c.suit === '♦') ? 'text-red-600' : (c.suit === '♣' ? 'text-green-600' : 'text-zinc-900'); el.innerHTML += `<div class="bg-white w-9 h-14 flex flex-col items-center justify-center rounded-md font-bold text-xs border border-zinc-300 shadow-md"><span class="${col} leading-none mb-1">${c.rank}</span><span class="${col} text-lg leading-none">${c.suit}</span></div>`; }); }
+  function evaluateHand(h, b) { const all = [...h, ...b]; if (all.length < 5) return { score: 0, label: "NINGUNA" }; const suits = {}, rC = {}, rankValues = all.map(c => getVal(c.rank)).sort((a,b)=>b-a); all.forEach(c => { suits[c.suit] = (suits[c.suit]||0)+1; rC[c.rank] = (rC[c.rank]||0)+1; }); let flushSuit = null; for (let s in suits) if (suits[s] >= 5) flushSuit = s; const uniqueRanks = [...new Set(rankValues)].sort((a,b)=>b-a); let straightHigh = -1; for (let i=0; i <= uniqueRanks.length-5; i++) if (uniqueRanks[i] - uniqueRanks[i+4] === 4) { straightHigh = uniqueRanks[i]; break; } if (straightHigh === -1 && [14, 5, 4, 3, 2].every(v => uniqueRanks.includes(v))) straightHigh = 5; const groups = Object.entries(rC).sort((a,b) => getVal(b[0]) - getVal(a[0])); const quads = groups.filter(g => g[1] === 4); const trips = groups.filter(g => g[1] === 3); const pairs = groups.filter(g => g[1] === 2); if (quads.length > 0) return { score: 8, label: "PÓKER" }; if (trips.length > 0 && (trips.length > 1 || pairs.length > 0)) return { score: 7, label: "FULL HOUSE" }; if (flushSuit) return { score: 6, label: "COLOR" }; if (straightHigh !== -1) return { score: 5, label: "ESCALERA" }; if (trips.length > 0) return { score: 4, label: "TRÍO" }; if (pairs.length >= 2) return { score: 3, label: "DOBLES" }; if (pairs.length === 1) { const pairRank = getVal(pairs[0][0]); const boardRanks = b.map(c => getVal(c.rank)); const maxBoard = Math.max(...boardRanks); if (pairRank > maxBoard) return { score: 2.5, label: "OVERPAIR" }; if (pairRank === maxBoard) return { score: 2.2, label: "TOP PAIR" }; return { score: 2.1, label: "PAREJA BAJA" }; } return { score: 1, label: "CARTA ALTA" }; }
+  function calculateCleanOuts(h, b) { if (h.length < 2 || b.length < 3) return 0; const current = evaluateHand(h, b); let o = 0; const r=['2','3','4','5','6','7','8','9','T','J','Q','K','A'], s=['♥','♦','♣','♠']; for (let rank of r) for (let suit of s) { if (h.concat(b).some(c => c.rank === rank && c.suit === suit)) continue; if (evaluateHand(h, b.concat({rank, suit})).score > current.score) o++; } return Math.min(o, 21); }
+  function getVal(r) { const m={'A':14,'K':13,'Q':12,'J':11,'T':10,'10':10}; return m[r]||parseInt(r)||0; }
+
+  async function startCapture() {
+    try {
+      const s = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      video.srcObject = s; document.getElementById('btnScan').disabled = false;
+      document.getElementById('btnScan').className = "py-2 bg-primary text-black font-bold rounded text-xs uppercase";
+      
+      worker = await Tesseract.createWorker('eng'); 
+      await worker.setParameters({ tessedit_char_whitelist: '0123456789TJQKA.$' });
+      
+      // LOAD FIRST
+      loadZones(); 
+      loadTemplate(); 
+      
+      const sR = localStorage.getItem('gg_sens_rival_global');
+      const sD = localStorage.getItem('gg_sens_dealer_global');
+      if(sR) document.getElementById('sensRivalSlider').value = sR;
+      if(sD) document.getElementById('sensDealerSlider').value = sD * 100;
+      
+      // GENERATE BUTTONS (Corrected Order)
+      const grid = document.getElementById('manualPosGrid');
+      const SEAT_ORDER = ["SB", "BB", "UTG", "MP", "CO", "BTN"]; // Fix V36 order
+      if(grid.innerHTML==="") SEAT_ORDER.forEach(pos => { const btn = document.createElement('div'); btn.innerText = pos; btn.className = "pos-btn py-2"; btn.onclick = () => setManualPosition(pos); grid.appendChild(btn); });
+    } catch (e) {
+        console.error(e);
+        alert("Error al iniciar captura. Asegúrate de permitir el acceso.");
+    }
+  }
+
+  function toggleScan() { isScanning = !isScanning; document.getElementById('btnScan').innerText = isScanning ? "DETENER" : "ANALIZAR"; if(isScanning) { document.getElementById('aiReason').innerText = "Iniciando..."; scanInterval = setInterval(async ()=>{ await processCards(); runStrategy(); }, 1500); } else clearInterval(scanInterval); }
+  function setupDraggable(id) { const el = document.getElementById(id); const handle = el.querySelector('.resize-handle'); el.onmousedown = (e) => { if (e.target === handle) return; const p = el.parentElement; const sX = e.clientX, sY = e.clientY, sL = el.offsetLeft, sT = el.offsetTop; const onMove = (ev) => { el.style.left = ((sL + ev.clientX - sX) / p.offsetWidth * 100) + '%'; el.style.top = ((sT + ev.clientY - sY) / p.offsetHeight * 100) + '%'; }; const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); }; document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); }; handle.onmousedown = (e) => { e.stopPropagation(); const p = el.parentElement; const sX = e.clientX, sY = e.clientY, sW = el.offsetWidth, sH = el.offsetHeight; const onMove = (ev) => { el.style.width = ((sW + ev.clientX - sX) / p.offsetWidth * 100) + '%'; el.style.height = ((sH + ev.clientY - sY) / p.offsetHeight * 100) + '%'; }; const onUp = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); }; document.addEventListener('mousemove', onMove); document.addEventListener('mouseup', onUp); }; }
+  ['zoneHand','zoneBoard','zonePot','zoneR1','zoneR2','zoneR3','zoneR4','zoneR5','zoneB0','zoneB1','zoneB2','zoneB3','zoneB4','zoneB5'].forEach(id => setupDraggable(id));
+</script>
+</body>
+</html>
